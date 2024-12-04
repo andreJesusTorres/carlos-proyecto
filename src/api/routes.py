@@ -5,6 +5,10 @@ from flask import Flask, request, jsonify, url_for, Blueprint
 from api.models import db, User
 from api.utils import generate_sitemap, APIException
 from flask_cors import CORS
+from api.models import db, User
+from flask_jwt_extended import create_access_token
+from flask_jwt_extended import jwt_required, get_jwt_identity
+
 
 api = Blueprint('api', __name__)
 
@@ -20,3 +24,80 @@ def handle_hello():
     }
 
     return jsonify(response_body), 200
+
+@api.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    username = data.get('username')
+    email = data.get('email')
+    password = data.get('password')
+
+    if not username or not email or not password:
+        return jsonify({"error": "Missing username, email, or password"}), 400
+
+    if User.query.filter_by(email=email).first() or User.query.filter_by(username=username).first():
+        return jsonify({"error": "User with this username or email already exists"}), 400
+
+    user = User(username=username, email=email)
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+
+    return jsonify({"message": "User registered successfully"}), 201
+
+@api.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    if not username or not password:
+        return jsonify({"error": "Missing username or password"}), 400
+
+    user = User.query.filter_by(username=username).first()
+    if not user or not user.check_password(password):
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    token = create_access_token(identity=user.id)
+    return jsonify({"token": token}), 200
+
+@api.route('/user', methods=['GET'])
+@jwt_required()
+def get_user():
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    return jsonify(user.serialize()), 200
+
+@api.route('/user', methods=['PUT'])
+@jwt_required()
+def update_user():
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    data = request.get_json()
+    user.username = data.get('username', user.username)
+    user.email = data.get('email', user.email)
+    db.session.commit()
+
+    return jsonify({"message": "User updated successfully", "user": user.serialize()}), 200
+
+@api.route('/user', methods=['DELETE'])
+@jwt_required()
+def delete_user():
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    db.session.delete(user)
+    db.session.commit()
+
+    return jsonify({"message": "User deleted successfully"}), 200
